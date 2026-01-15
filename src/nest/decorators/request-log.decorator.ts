@@ -37,6 +37,7 @@ export function RequestLog(options: RequestLogOptions = {}): MethodDecorator {
           service,
           payload: {
             durationMs,
+            errorName: err.name,
             error: err.message,
             ...(err.stack ? { stack: err.stack } : {}),
           },

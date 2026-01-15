@@ -32,14 +32,14 @@ export class PinoLogAdapter implements ILogAdapter {
   }
 
   static pretty(opts: PrettyOptions = {}): PinoLogAdapter {
-    let stream: PinoPrettyStream;
+    let prettyStream: PinoPrettyStream;
 
     try {
       const PinoPretty = require('pino-pretty') as (
         options: Record<string, unknown>,
       ) => PinoPrettyStream;
 
-      stream = PinoPretty({
+      prettyStream = PinoPretty({
         singleLine: true,
         colorize: true,
         translateTime: 'HH:MM:ss.l',
@@ -67,11 +67,7 @@ export class PinoLogAdapter implements ILogAdapter {
             parts.push(`payload=${JSON.stringify(log['payload'])}`);
           }
 
-          const line = parts.join(' | ');
-
-          if (msg === 'request.start') return `\n${line}`;
-          if (msg === 'request.end')   return `${line}\n`;
-          return line;
+          return parts.join(' | ');
         },
       });
     } catch {
@@ -81,9 +77,17 @@ export class PinoLogAdapter implements ILogAdapter {
       );
     }
 
+    const spaced = new Transform({
+      transform(chunk: Buffer, _enc, cb) {
+        prettyStream.write(chunk.toString());
+        process.stdout.write('\n');
+        cb();
+      },
+    });
+
     return new PinoLogAdapter({
       pino: { level: opts.level ?? 'debug' },
-      destination: stream,
+      destination: spaced as unknown as pino.DestinationStream,
     });
   }
 

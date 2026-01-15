@@ -33,7 +33,11 @@ export function StepLog(
         const err = error as Error;
         logger.error(`step.${stepName}.error`, {
           service,
-          payload: { error: err.message },
+          payload: {
+            errorName: err.name,
+            error: err.message,
+            ...(err.stack ? { stack: err.stack } : {}),
+          },
         });
         throw error;
       }

@@ -35,7 +35,11 @@ export function ServiceLog(options: ServiceLogOptions = {}): MethodDecorator {
         const err = error as Error;
         logger.error('service.error', {
           service,
-          payload: { error: err.message },
+          payload: {
+            errorName: err.name,
+            error: err.message,
+            ...(err.stack ? { stack: err.stack } : {}),
+          },
         });
         throw error;
       }
