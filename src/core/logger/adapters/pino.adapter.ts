@@ -1,4 +1,5 @@
 import pino from 'pino';
+import { Transform } from 'node:stream';
 import type { LogLevel } from '../../../types/options.js';
 import type { ILogAdapter } from './adapter.interface.js';
 
@@ -34,7 +35,6 @@ export class PinoLogAdapter implements ILogAdapter {
     let stream: PinoPrettyStream;
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const PinoPretty = require('pino-pretty') as (
         options: Record<string, unknown>,
       ) => PinoPrettyStream;

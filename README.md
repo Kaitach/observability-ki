@@ -1,8 +1,285 @@
 # observability-kit
 
-> Reusable structured logging + request-tracing library for **NestJS** and **plain Node.js**.
+Structured logging + request tracing for **NestJS** and **plain Node.js**.
 
-![npm](https://img.shields.io/npm/v/observability-kit)
+Automatic `requestId` correlation across controllers, services and internal steps — no manual ID passing.
+
+---
+
+## Install
+
+```bash
+npm install observability-kit
+```
+
+Peer deps (NestJS only):
+
+```bash
+npm install @nestjs/common @nestjs/core rxjs
+```
+
+---
+
+## Entry points
+
+| Import | Contents |
+|---|---|
+| `observability-kit` | Core — context helpers + logger |
+| `observability-kit/nestjs` | Core + NestJS module, decorators and interceptor |
+
+---
+
+## How it works
+
+```
+HTTP Request
+     ↓
+TraceInterceptor           reads / generates requestId
+     ↓
+AsyncLocalStorage context  requestId lives here for the full async chain
+     ↓
+@RequestLog                emits request.start / request.end
+     ↓
+@ServiceLog                emits service.enter / service.exit
+     ↓
+@StepLog                   emits step.<name>
+```
+
+Every log line carries the same `requestId` automatically.
+
+---
+
+## NestJS setup
+
+### 1. Register the module
+
+```typescript
+// app.module.ts
+import { Module } from '@nestjs/common';
+import { TraceLoggerModule } from 'observability-kit/nestjs';
+
+@Module({
+  imports: [
+    TraceLoggerModule.forRoot({
+      serviceName: 'my-api',
+      requestIdHeaderName: 'x-request-id', // default
+      enableResponseHeader: true,
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+### 2. Register the interceptor globally
+
+```typescript
+// main.ts
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { TraceInterceptor } from 'observability-kit/nestjs';
+import { logger, PinoLogAdapter } from 'observability-kit';
+
+async function bootstrap() {
+  logger.setAdapter(PinoLogAdapter.pretty()); // desarrollo — salida legible
+  // logger.setAdapter(new PinoLogAdapter());  // producción — JSON puro
+
+  const app = await NestFactory.create(AppModule);
+  app.useGlobalInterceptors(app.get(TraceInterceptor));
+  await app.listen(3000);
+}
+bootstrap();
+```
+
+### 3. Decorar controllers y services
+
+```typescript
+import { Controller, Get, Param } from '@nestjs/common';
+import { RequestLog, ServiceLog, StepLog } from 'observability-kit/nestjs';
+
+@Controller('orders')
+export class OrdersController {
+  constructor(private readonly ordersService: OrdersService) {}
+
+  @Get(':id')
+  @RequestLog()
+  findOne(@Param('id') id: string) {
+    return this.ordersService.findOne(id);
+  }
+}
+
+@Injectable()
+export class OrdersService {
+  @ServiceLog()
+  async findOne(id: string) {
+    return this.calculateTotal(id);
+  }
+
+  @StepLog('calculate-total', {
+    payloadBuilder: (id: string) => ({ id }),
+  })
+  private calculateTotal(id: string) { /* ... */ }
+}
+```
+
+---
+
+## Decoradores
+
+### `@RequestLog(options?)`
+
+Aplica en métodos de **controller**. Emite `request.start`, `request.end` y `request.error`.
+
+| Opción | Tipo | Descripción |
+|---|---|---|
+| `payloadBuilder` | `(...args) => object` | Extrae payload de los argumentos del método |
+
+### `@ServiceLog(options?)`
+
+Aplica en métodos de **service**. Emite `service.enter`, `service.exit` y `service.error`.
+
+| Opción | Tipo | Default |
+|---|---|---|
+| `payloadBuilder` | `(...args) => object` | — |
+| `level` | `LogLevel` | `'info'` |
+| `logExit` | `boolean` | `true` |
+
+### `@StepLog(stepName, options?)`
+
+Aplica en métodos internos. Emite `step.<stepName>` y `step.<stepName>.error`.
+
+| Opción | Tipo | Default |
+|---|---|---|
+| `payloadBuilder` | `(...args) => object` | — |
+| `level` | `LogLevel` | `'debug'` |
+
+---
+
+## Logger y adaptadores
+
+La librería usa **Pino** como backend por defecto.
+
+### Desarrollo — una línea por evento, colores
+
+Requiere `pino-pretty`:
+
+```bash
+npm install -D pino-pretty
+```
+
+```typescript
+import { logger, PinoLogAdapter } from 'observability-kit';
+
+logger.setAdapter(PinoLogAdapter.pretty());
+```
+
+Output:
+
+```
+[06:14:42] INFO: request.start | endpoint=/orders/1 | method=GET | req=46cfd3ae
+[06:14:42] INFO: service.enter | service=OrdersService.findOne | req=46cfd3ae
+[06:14:42] DEBUG: step.calculate-total | service=OrdersService.calculateTotal | req=46cfd3ae | payload={"id":"1"}
+[06:14:42] INFO: service.exit | service=OrdersService.findOne | req=46cfd3ae
+[06:14:42] INFO: request.end | endpoint=/orders/1 | method=GET | req=46cfd3ae | payload={"durationMs":12}
+```
+
+Nivel mínimo:
+
+```typescript
+logger.setAdapter(PinoLogAdapter.pretty({ level: 'info' })); // oculta debug
+```
+
+### Producción — JSON puro, async non-blocking
+
+```typescript
+import pino from 'pino';
+import { logger, PinoLogAdapter } from 'observability-kit';
+
+const dest = pino.destination({ sync: false });
+logger.setAdapter(new PinoLogAdapter({ destination: dest }));
+```
+
+### Adaptador personalizado
+
+```typescript
+import type { ILogAdapter, LogLevel } from 'observability-kit';
+import { logger } from 'observability-kit';
+
+class MyAdapter implements ILogAdapter {
+  log(level: LogLevel, message: string, data: Record<string, unknown>): void {
+    // enviar a cualquier sistema
+  }
+}
+
+logger.setAdapter(new MyAdapter());
+```
+
+---
+
+## Plain Node.js
+
+Sin NestJS. Importa desde `observability-kit`.
+
+```typescript
+import { startContext, logger } from 'observability-kit';
+import http from 'http';
+
+http.createServer(async (req, res) => {
+  await startContext(
+    { requestId: req.headers['x-request-id'] as string, endpoint: req.url, method: req.method },
+    async () => {
+      logger.info('request.start', { service: 'http-server' });
+      res.end('OK');
+      logger.info('request.end', { service: 'http-server' });
+    },
+  );
+}).listen(3000);
+```
+
+---
+
+## Context helpers
+
+```typescript
+import { getContext, getRequestId, setContextField } from 'observability-kit';
+
+const ctx = getContext();                      // { requestId, endpoint?, method?, service? }
+const id  = getRequestId();                    // string | undefined
+setContextField('service', 'payment-worker');
+```
+
+---
+
+## Estructura del proyecto
+
+```
+src/
+  types/options.ts
+  core/
+    context/request-context.ts
+    logger/
+      structured-logger.ts
+      adapters/
+        adapter.interface.ts
+        node.adapter.ts
+        pino.adapter.ts
+  nest/
+    adapters/nest.adapter.ts
+    decorators/
+      request-log.decorator.ts
+      service-log.decorator.ts
+      step-log.decorator.ts
+    interceptors/request.interceptor.ts
+    module/trace-logger.module.ts
+  index.ts
+  nestjs.ts
+```
+
+---
+
+## License
+
+MIT
+
 ![downloads](https://img.shields.io/npm/dm/observability-kit)
 ![license](https://img.shields.io/npm/l/observability-kit)
 
