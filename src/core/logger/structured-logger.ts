@@ -1,12 +1,12 @@
 import { getContext } from '../context/request-context.js';
 import type { ILogAdapter } from './adapters/adapter.interface.js';
-import { NodeLogAdapter } from './adapters/node.adapter.js';
+import { PinoLogAdapter } from './adapters/pino.adapter.js';
 
 export class StructuredLogger {
   private adapter: ILogAdapter;
 
   constructor(adapter?: ILogAdapter) {
-    this.adapter = adapter ?? new NodeLogAdapter();
+    this.adapter = adapter ?? new PinoLogAdapter();
   }
 
   setAdapter(adapter: ILogAdapter): void {

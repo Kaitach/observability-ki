@@ -2,10 +2,10 @@ import type { ILogAdapter } from '../../core/logger/adapters/adapter.interface.j
 import type { LogLevel } from '../../types/options.js';
 
 interface NestLike {
-  log(message: string, context?: string): void;
-  debug(message: string, context?: string): void;
-  warn(message: string, context?: string): void;
-  error(message: string, context?: string): void;
+  log(message: string): void;
+  debug(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
 }
 
 const CONTEXT = 'TraceLogger';
@@ -27,7 +27,18 @@ export class NestLogAdapter implements ILogAdapter {
   }
 
   log(level: LogLevel, message: string, data: Record<string, unknown>): void {
-    const serialised = JSON.stringify(data);
+    const { timestamp: _ts, message: _msg, ...rest } = data;
+
+    const fields = Object.entries(rest)
+      .map(([k, v]) => {
+        if (v !== null && typeof v === 'object') {
+          return `${k}=${JSON.stringify(v)}`;
+        }
+        return `${k}=${String(v)}`;
+      })
+      .join(' | ');
+
+    const serialised = fields.length > 0 ? `${message} | ${fields}` : message;
     const target = this.syncLogger;
 
     if (target) {
@@ -46,16 +57,16 @@ export class NestLogAdapter implements ILogAdapter {
   private emit(target: NestLike, level: LogLevel, serialised: string): void {
     switch (level) {
       case 'debug':
-        target.debug(serialised, CONTEXT);
+        target.debug(serialised);
         break;
       case 'warn':
-        target.warn(serialised, CONTEXT);
+        target.warn(serialised);
         break;
       case 'error':
-        target.error(serialised, CONTEXT);
+        target.error(serialised);
         break;
       default:
-        target.log(serialised, CONTEXT);
+        target.log(serialised);
     }
   }
 }
