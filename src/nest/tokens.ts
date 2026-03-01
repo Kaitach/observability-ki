@@ -1,0 +1,1 @@
+export const TRACE_LOGGER_OPTIONS = Symbol('TRACE_LOGGER_OPTIONS');
