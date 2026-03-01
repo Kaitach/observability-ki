@@ -79,8 +79,12 @@ export class PinoLogAdapter implements ILogAdapter {
 
     const spaced = new Transform({
       transform(chunk: Buffer, _enc, cb) {
-        prettyStream.write(chunk.toString());
-        process.stdout.write('\n');
+        const raw = chunk.toString();
+        const lines = raw.split('\n').filter((l) => l.trim().length > 0);
+        for (const line of lines) {
+          prettyStream.write(line + '\n');
+          process.stdout.write('\n');
+        }
         cb();
       },
     });
